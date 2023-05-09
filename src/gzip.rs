@@ -1,10 +1,16 @@
 mod deflate;
 mod flags;
+
+// todo: does the gzip spec allow identity encoding?
+#[allow(unused)]
 mod identity_decoder;
 
 use self::flags::Flags;
 use crate::bufread::Item;
-use std::io::{self, prelude::*, ErrorKind};
+use std::{
+    io::{self, prelude::*, ErrorKind},
+    mem,
+};
 
 pub struct Decoder<R: BufRead> {
     input: R,
@@ -15,7 +21,7 @@ pub struct Decoder<R: BufRead> {
 enum State {
     #[default]
     Header,
-    Body,
+    Body(deflate::DecoderState),
     Footer,
     Done,
 }
@@ -26,10 +32,7 @@ impl<R: BufRead> Iterator for Decoder<R> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.next_state() {
-                Err(e) => {
-                    self.state = State::Done;
-                    return Some(Err(e));
-                }
+                Err(e) => return Some(Err(e)),
                 Ok(None) => match self.state {
                     State::Done => return None,
                     _ => continue,
@@ -50,22 +53,24 @@ impl<R: BufRead> Decoder<R> {
 
     /// On success, transition states and possibly return an output chunk.
     ///
-    /// On failure, just return the error (don't transition states).
+    /// On failure, transition to the `Done` state and return an error.
     fn next_state(&mut self) -> io::Result<Option<Vec<u8>>> {
         let mut chunk = None;
 
-        self.state = match self.state {
+        let old_state = mem::replace(&mut self.state, State::Done);
+        let new_state = match old_state {
             State::Header => {
                 let flags = self.read_required_headers()?;
                 self.discard_optional_headers(flags)?;
 
-                State::Body
+                State::Body(deflate::DecoderState::new())
             }
-            State::Body => {
-                chunk = self.body_next_chunk()?;
+            State::Body(state) => {
+                let mut inner_decoder = deflate::Decoder::resume(state, &mut self.input);
+                chunk = inner_decoder.next_chunk()?;
 
                 if chunk.is_some() {
-                    State::Body
+                    State::Body(inner_decoder.into_state())
                 } else {
                     State::Footer
                 }
@@ -78,6 +83,7 @@ impl<R: BufRead> Decoder<R> {
             }
             State::Done => State::Done,
         };
+        self.state = new_state;
 
         Ok(chunk)
     }
@@ -88,8 +94,11 @@ impl<R: BufRead> Decoder<R> {
 
         let magic_number = [0x1f, 0x8b];
         let first_2 = &header[..2];
-        if first_2 != &magic_number {
-            let msg = format!("unrecognized gzip magic; got {first_2:?}");
+        if first_2 != magic_number {
+            let msg = format!(
+                "unrecognized gzip magic. \
+                expected {magic_number:?}, got {first_2:?}"
+            );
             return Err(io::Error::new(ErrorKind::Other, msg));
         }
 
@@ -145,11 +154,6 @@ impl<R: BufRead> Decoder<R> {
         Ok(())
     }
 
-    fn body_next_chunk(&mut self) -> io::Result<Option<Vec<u8>>> {
-        let mut inner_decoder = identity_decoder::Decoder::new(&mut self.input);
-        inner_decoder.next_chunk()
-    }
-
     /// The gzip spec permits ignoring the CRC, but it would be nice to
     /// implement this.
     fn validate_footer(&mut self) -> io::Result<()> {
@@ -162,6 +166,9 @@ impl<R: BufRead> Decoder<R> {
         if self.input.fill_buf()?.is_empty() {
             Ok(())
         } else {
+            // todo: does our impl still conform to the spec?
+            // (maybe we should impl multi-streams...)
+
             // We could add support for gzip multi-streams at some point,
             // but they're almost never used. People prefer to simply `tar`
             // and then `gzip` if they're compressing multiple files.
