@@ -1,5 +1,7 @@
 mod deflate;
+mod deflate2;
 mod flags;
+mod huffmanencoding;
 
 // todo: does the gzip spec allow identity encoding?
 #[allow(unused)]
