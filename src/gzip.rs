@@ -181,7 +181,7 @@ impl<R: BufRead> Decoder<R> {
     }
 }
 
-fn read_u16_le(mut input: impl Read) -> io::Result<u16> {
+pub fn read_u16_le(mut input: impl Read) -> io::Result<u16> {
     let mut buf = [0; 2];
     input.read_exact(&mut buf)?;
     Ok(u16::from_le_bytes(buf))
