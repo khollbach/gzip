@@ -1,12 +1,14 @@
 mod out_buf;
 
-use self::out_buf::OutBuf;
-use crate::bufread::Item;
+use std::io::{self, BufRead, ErrorKind};
+
 use miniz_oxide::{
     inflate::stream::{self as mz_stream, InflateState},
     DataFormat, MZFlush, MZStatus,
 };
-use std::io::{self, BufRead, ErrorKind};
+
+use self::out_buf::OutBuf;
+use crate::bufread::Item;
 
 /// Size of decompressed chunks (except possibly the last chunk, which may be
 /// smaller).

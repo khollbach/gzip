@@ -1,5 +1,6 @@
-use bitflags::bitflags;
 use std::io::{self, ErrorKind};
+
+use bitflags::bitflags;
 
 bitflags! {
     /// Gzip header flags.

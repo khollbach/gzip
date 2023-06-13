@@ -5,12 +5,13 @@ mod flags;
 #[allow(unused)]
 mod identity_decoder;
 
-use self::flags::Flags;
-use crate::bufread::Item;
 use std::{
     io::{self, prelude::*, ErrorKind},
     mem,
 };
+
+use self::flags::Flags;
+use crate::bufread::Item;
 
 pub struct Decoder<R: BufRead> {
     input: R,
@@ -193,10 +194,12 @@ fn read_u32_le(mut input: impl Read) -> io::Result<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use flate2::{read::GzEncoder, Compression};
     use std::io::Cursor;
+
+    use flate2::{read::GzEncoder, Compression};
     use test_case::test_case;
+
+    use super::*;
 
     #[test_case(b"Hello world!")]
     #[test_case(b"abc")]

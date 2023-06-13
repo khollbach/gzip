@@ -1,9 +1,9 @@
 mod bufread;
 mod gzip;
 
-use crate::bufread::BufReadAdapter;
-use crate::gzip::Decoder;
 use std::io::prelude::*;
+
+use crate::{bufread::BufReadAdapter, gzip::Decoder};
 
 pub fn decode(compressed_input: impl BufRead) -> impl BufRead {
     let decoder = Decoder::new(compressed_input);

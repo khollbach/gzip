@@ -1,5 +1,6 @@
-use crate::bufread::Item;
 use std::io::{self, BufRead};
+
+use crate::bufread::Item;
 
 /// A wrapper around a buffered reader.
 ///
