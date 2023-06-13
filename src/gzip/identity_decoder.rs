@@ -5,6 +5,9 @@ use crate::bufread::Item;
 /// A wrapper around a buffered reader.
 ///
 /// Implements iterator, producing chunks of bytes.
+///
+/// Note that this copies the chunks into owned buffers. There might be a way to
+/// borrow them from the original reader instead. (todo)
 pub struct Decoder<R: BufRead> {
     input: R,
 }
@@ -28,7 +31,8 @@ impl<R: BufRead> Iterator for Decoder<R> {
 }
 
 impl<R: BufRead> Decoder<R> {
-    /// The same logic as `Iterator::next`, but with slightly different types.
+    /// Helper function for `Iterator::next`. The same logic, but slightly
+    /// different types.
     ///
     /// Return `Ok(None)` on EOF.
     pub fn next_chunk(&mut self) -> io::Result<Option<Vec<u8>>> {

@@ -6,6 +6,11 @@ use std::io::Cursor;
 /// more like [`std::io::BufRead`]:
 /// * The internal buffer is exposed via `remaining()`.
 /// * The caller declares how many bytes they've written with `advance(n)`.
+///
+/// You can "consume" the current contents of the buffer into an owned chunk,
+/// with `take()`.
+///
+/// todo: write a comment explaining why we need this
 pub struct OutBuf {
     buf: Cursor<Vec<u8>>,
 }
@@ -39,7 +44,7 @@ impl OutBuf {
         self.buf.set_position(pos as u64);
     }
 
-    /// Clone the contents of the buffer, and reset it to empty.
+    /// Clone the contents of the buffer, and reset it to be empty.
     pub fn take(&mut self) -> Vec<u8> {
         let pos = self.buf.position() as usize;
         let contents = self.buf.get_ref()[..pos].to_vec();

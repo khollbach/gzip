@@ -20,6 +20,9 @@ pub struct Decoder<R: BufRead> {
     state: DecoderState,
 }
 
+/// todo: write a comment explaining the "pause/resume" mechanic and why it's
+/// necessary. (iirc its to do with ownership of the input stream.. TODO: what
+/// about just using Rc to make that issue go away?)
 pub struct DecoderState {
     mz_state: Box<InflateState>,
     out_buf: OutBuf,
@@ -43,14 +46,17 @@ impl<R: BufRead> Decoder<R> {
         self.state
     }
 
+    /// Helper function for `Iterator::next`.
     pub fn next_chunk(&mut self) -> io::Result<Option<Vec<u8>>> {
         loop {
-            let in_buf = self.input.fill_buf()?;
-            let out_buf = self.state.out_buf.remaining();
-
             // Use miniz-oxide to perform the deflate decoding.
             // todo: implement deflate by-hand yourself.
-            let info = mz_stream::inflate(&mut self.state.mz_state, in_buf, out_buf, MZFlush::None);
+            let info = mz_stream::inflate(
+                &mut self.state.mz_state,
+                self.input.fill_buf()?,
+                self.state.out_buf.remaining(),
+                MZFlush::None,
+            );
             let io_error = |e| io::Error::new(ErrorKind::Other, format!("{e:?}"));
             let status = info.status.map_err(io_error)?;
 

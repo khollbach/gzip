@@ -18,9 +18,8 @@ pub struct Decoder<R: BufRead> {
     state: State,
 }
 
-#[derive(Default)]
+#[derive(PartialEq, Eq)]
 enum State {
-    #[default]
     Header,
     Body(deflate::DecoderState),
     Footer,
@@ -31,14 +30,17 @@ impl<R: BufRead> Iterator for Decoder<R> {
     type Item = Item;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Call `next_state` until it:
+        // * produces a chunk or an error, or
+        // * transitions to the Done state.
+        //
+        // If it returns None and state != Done, keep polling.
+
         loop {
-            match self.next_state() {
-                Err(e) => return Some(Err(e)),
-                Ok(None) => match self.state {
-                    State::Done => return None,
-                    _ => continue,
-                },
-                Ok(Some(chunk)) => return Some(Ok(chunk)),
+            let item = self.next_state().transpose();
+
+            if item.is_some() || self.state == State::Done {
+                return item;
             }
         }
     }
@@ -48,17 +50,22 @@ impl<R: BufRead> Decoder<R> {
     pub fn new(input: R) -> Self {
         Self {
             input,
-            state: State::default(),
+            state: State::Header,
         }
     }
 
     /// On success, transition states and possibly return an output chunk.
     ///
     /// On failure, transition to the `Done` state and return an error.
+    ///
+    /// Note that Ok(None) doesn't necessarily mean EOF -- you have to check for
+    /// self.state == Done as well.
     fn next_state(&mut self) -> io::Result<Option<Vec<u8>>> {
         let mut chunk = None;
 
+        // Replace self.state with Done, in case we bail via the `?` operator.
         let old_state = mem::replace(&mut self.state, State::Done);
+
         let new_state = match old_state {
             State::Header => {
                 let flags = self.read_required_headers()?;
@@ -84,6 +91,7 @@ impl<R: BufRead> Decoder<R> {
             }
             State::Done => State::Done,
         };
+
         self.state = new_state;
 
         Ok(chunk)
@@ -143,7 +151,7 @@ impl<R: BufRead> Decoder<R> {
 
         if flags.contains(Flags::HCRC) {
             // Ignored, as permitted by the RFC.
-            // It would be nice to implement this.
+            // It would be nice to implement this. (todo)
             let _header_crc = read_u16_le(&mut self.input)?;
         }
 
@@ -156,7 +164,7 @@ impl<R: BufRead> Decoder<R> {
     }
 
     /// The gzip spec permits ignoring the CRC, but it would be nice to
-    /// implement this.
+    /// implement this. (todo)
     fn validate_footer(&mut self) -> io::Result<()> {
         let _crc = read_u32_le(&mut self.input)?;
         let _uncompressed_size_mod_32 = read_u32_le(&mut self.input)?;
@@ -205,11 +213,11 @@ mod tests {
     #[test_case(b"abc")]
     #[test_case(b"A")]
     #[test_case(b"")]
-    fn round_trip(uncompressed: &[u8]) {
-        let compressed = gzip_compress(uncompressed);
+    fn round_trip(input: &[u8]) {
+        let compressed = gzip_compress(input);
         let decoder = Decoder::new(Cursor::new(compressed));
         let decompressed: Vec<u8> = decoder.map(Result::unwrap).flatten().collect();
-        assert_eq!(&decompressed, uncompressed);
+        assert_eq!(&decompressed, input);
     }
 
     fn gzip_compress(bytes: &[u8]) -> Vec<u8> {

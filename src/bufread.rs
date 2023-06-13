@@ -19,14 +19,15 @@ pub struct BufReadAdapter<I: Iterator<Item = Item>> {
 impl<I: Iterator<Item = Item>> BufReadAdapter<I> {
     pub fn new(chunks: I) -> Self {
         Self {
-            chunks,
             curr_chunk: Cursor::default(),
+            chunks,
         }
     }
 }
 
 impl<I: Iterator<Item = Item>> BufRead for BufReadAdapter<I> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        // Re-fill the current chunk, if necessary.
         if self.curr_chunk.fill_buf()?.is_empty() {
             self.curr_chunk = match self.chunks.next().transpose()? {
                 Some(new_chunk) => Cursor::new(new_chunk),
