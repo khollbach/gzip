@@ -1,7 +1,5 @@
 use std::io::{self, BufRead};
 
-use crate::bufread::Item;
-
 /// A wrapper around a buffered reader.
 ///
 /// Implements iterator, producing chunks of bytes.
@@ -19,7 +17,7 @@ impl<R: BufRead> Decoder<R> {
 }
 
 impl<R: BufRead> Iterator for Decoder<R> {
-    type Item = Item;
+    type Item = io::Result<Vec<u8>>;
 
     /// Get the next chunk.
     ///

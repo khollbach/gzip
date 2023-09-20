@@ -2,7 +2,7 @@ mod deflate;
 mod flags;
 
 // todo: does the gzip spec allow identity encoding?
-#[allow(unused)]
+#[allow(dead_code)]
 mod identity_decoder;
 
 use std::{
@@ -10,8 +10,7 @@ use std::{
     mem,
 };
 
-use self::flags::Flags;
-use crate::bufread::Item;
+use flags::Flags;
 
 pub struct Decoder<R: BufRead> {
     input: R,
@@ -26,7 +25,7 @@ enum State {
 }
 
 impl<R: BufRead> Iterator for Decoder<R> {
-    type Item = Item;
+    type Item = io::Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // Call `next_state` until it:

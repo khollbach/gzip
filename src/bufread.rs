@@ -1,14 +1,9 @@
 use std::io::{self, prelude::*, Cursor};
 
-/// Local alias, just for convenience.
-///
-/// Either an output chunk or an error.
-pub(crate) type Item = io::Result<Vec<u8>>;
-
 /// A wrapper around an iterator of chunks of bytes.
 ///
 /// Implements `BufRead`.
-pub struct BufReadAdapter<I: Iterator<Item = Item>> {
+pub struct BufReadAdapter<I: Iterator<Item = io::Result<Vec<u8>>>> {
     /// The (perhaps partially-consumed) current chunk.
     curr_chunk: Cursor<Vec<u8>>,
 
@@ -16,7 +11,7 @@ pub struct BufReadAdapter<I: Iterator<Item = Item>> {
     chunks: I,
 }
 
-impl<I: Iterator<Item = Item>> BufReadAdapter<I> {
+impl<I: Iterator<Item = io::Result<Vec<u8>>>> BufReadAdapter<I> {
     pub fn new(chunks: I) -> Self {
         Self {
             curr_chunk: Cursor::default(),
@@ -25,7 +20,7 @@ impl<I: Iterator<Item = Item>> BufReadAdapter<I> {
     }
 }
 
-impl<I: Iterator<Item = Item>> BufRead for BufReadAdapter<I> {
+impl<I: Iterator<Item = io::Result<Vec<u8>>>> BufRead for BufReadAdapter<I> {
     fn fill_buf(&mut self) -> io::Result<&[u8]> {
         // Re-fill the current chunk, if necessary.
         if self.curr_chunk.fill_buf()?.is_empty() {
@@ -43,7 +38,7 @@ impl<I: Iterator<Item = Item>> BufRead for BufReadAdapter<I> {
     }
 }
 
-impl<I: Iterator<Item = Item>> Read for BufReadAdapter<I> {
+impl<I: Iterator<Item = io::Result<Vec<u8>>>> Read for BufReadAdapter<I> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n = self.fill_buf()?.read(buf)?;
         self.consume(n);

@@ -8,7 +8,6 @@ use miniz_oxide::{
 };
 
 use self::out_buf::OutBuf;
-use crate::bufread::Item;
 
 /// Size of decompressed chunks (except possibly the last chunk, which may be
 /// smaller).
@@ -86,7 +85,7 @@ impl<R: BufRead> Decoder<R> {
 }
 
 impl<R: BufRead> Iterator for Decoder<R> {
-    type Item = Item;
+    type Item = io::Result<Vec<u8>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.next_chunk().transpose()
