@@ -18,7 +18,6 @@ pub struct Decoder<R: BufRead> {
     state: State,
 }
 
-#[derive(PartialEq, Eq)]
 enum State {
     Header,
     Body(deflate::DecoderState),
@@ -39,7 +38,7 @@ impl<R: BufRead> Iterator for Decoder<R> {
         loop {
             let item = self.next_state().transpose();
 
-            if item.is_some() || self.state == State::Done {
+            if item.is_some() || matches!(self.state, State::Done) {
                 return item;
             }
         }
