@@ -1,10 +1,6 @@
 mod deflate;
 mod flags;
 
-// todo: does the gzip spec allow identity encoding?
-#[allow(dead_code)]
-mod identity_decoder;
-
 use std::io::{self, prelude::*, ErrorKind};
 
 use flags::Flags;
