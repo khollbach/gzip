@@ -1,7 +1,13 @@
+#[allow(dead_code)]
+mod deflate_miniz;
+
 mod deflate;
 mod flags;
 
-use std::io::{self, prelude::*, ErrorKind};
+use std::{
+    error::Error as StdError,
+    io::{self, prelude::*, ErrorKind},
+};
 
 use flags::Flags;
 
@@ -14,12 +20,19 @@ pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     // This tricks `propane` into thinking we're not holding a reference across
     // a yield-point... but idk if the code is actually 'correct'.
     let raw_input: *mut _ = &mut input;
-    for chunk in deflate::decode(unsafe { raw_input.as_mut().unwrap() }) {
+    for chunk in deflate_miniz::decode(unsafe { raw_input.as_mut().unwrap() }) {
         yield Ok(chunk?);
     }
 
     validate_footer(&mut input)?;
     validate_eof(&mut input)?;
+}
+
+fn error<T, E>(error: E) -> io::Result<T>
+where
+    E: Into<Box<dyn StdError + Send + Sync>>,
+{
+    Err(io::Error::new(ErrorKind::Other, error))
 }
 
 fn read_required_headers(mut input: impl BufRead) -> io::Result<Flags> {
@@ -29,21 +42,19 @@ fn read_required_headers(mut input: impl BufRead) -> io::Result<Flags> {
     let magic_number = [0x1f, 0x8b];
     let first_2 = &header[..2];
     if first_2 != magic_number {
-        let msg = format!(
+        error(format!(
             "unrecognized gzip magic. \
             expected {magic_number:?}, got {first_2:?}"
-        );
-        return Err(io::Error::new(ErrorKind::Other, msg));
+        ))?;
     }
 
     let method = header[2];
     if method != 8 {
         let reserved = if method < 8 { "reserved value " } else { "" };
-        let msg = format!(
+        error(format!(
             "unsupported compression method. \
             expected 8, got {reserved}{method}"
-        );
-        return Err(io::Error::new(ErrorKind::Other, msg));
+        ))?;
     }
 
     let flags = Flags::new(header[3])?;
@@ -97,19 +108,20 @@ fn validate_footer(mut input: impl BufRead) -> io::Result<()> {
 }
 
 fn validate_eof(mut input: impl BufRead) -> io::Result<()> {
-    if input.fill_buf()?.is_empty() {
-        Ok(())
-    } else {
-        // todo: does our impl still conform to the spec?
-        // (maybe we should impl multi-streams...)
-
+    if !input.fill_buf()?.is_empty() {
         // We could add support for gzip multi-streams at some point,
         // but they're almost never used. People prefer to simply `tar`
         // and then `gzip` if they're compressing multiple files.
-        let msg = "expected eof, but got more bytes \
-            (note: multiple gzip members not supported)";
-        Err(io::Error::new(ErrorKind::Other, msg))
+        error(
+            "expected eof, but got more bytes \
+            (note: multiple gzip members not supported)",
+        )?;
+
+        // todo: does our impl still conform to the spec?
+        // (maybe we should impl multi-streams...)
     }
+
+    Ok(())
 }
 
 fn read_u16_le(mut input: impl BufRead) -> io::Result<u16> {
