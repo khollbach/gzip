@@ -11,6 +11,23 @@ use std::{
 
 use flags::Flags;
 
+// #[propane::generator]
+// pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
+//     let flags = read_required_headers(&mut input)?;
+//     discard_optional_headers(&mut input, flags)?;
+
+//     // (TODO: is this safe?)
+//     // This tricks `propane` into thinking we're not holding a reference across
+//     // a yield-point... but idk if the code is actually 'correct'.
+//     let raw_input: *mut _ = &mut input;
+//     for chunk in deflate_miniz::decode(unsafe { raw_input.as_mut().unwrap() }) {
+//         yield Ok(chunk?);
+//     }
+
+//     validate_footer(&mut input)?;
+//     validate_eof(&mut input)?;
+// }
+
 #[propane::generator]
 pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     let flags = read_required_headers(&mut input)?;
@@ -27,6 +44,7 @@ pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     validate_footer(&mut input)?;
     validate_eof(&mut input)?;
 }
+
 
 fn error<T, E>(error: E) -> io::Result<T>
 where
