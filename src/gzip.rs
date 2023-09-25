@@ -2,14 +2,11 @@
 mod deflate_miniz;
 
 mod deflate;
-mod flags;
+pub mod flags;
 
-use std::{
-    error::Error as StdError,
-    io::{self, prelude::*, ErrorKind},
-};
+use std::io::{self, prelude::*};
 
-use flags::Flags;
+use crate::{error, read_u32_le};
 
 // #[propane::generator]
 // pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
@@ -29,10 +26,7 @@ use flags::Flags;
 // }
 
 #[propane::generator]
-pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
-    let flags = read_required_headers(&mut input)?;
-    discard_optional_headers(&mut input, flags)?;
-
+pub fn decode_body(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     // (TODO: is this safe?)
     // This tricks `propane` into thinking we're not holding a reference across
     // a yield-point... but idk if the code is actually 'correct'.
@@ -45,77 +39,69 @@ pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     validate_eof(&mut input)?;
 }
 
+// fn read_required_headers(mut input: impl BufRead) -> io::Result<Flags> {
+//     let mut header = [0; 10];
+//     input.read_exact(&mut header)?;
 
-fn error<T, E>(error: E) -> io::Result<T>
-where
-    E: Into<Box<dyn StdError + Send + Sync>>,
-{
-    Err(io::Error::new(ErrorKind::Other, error))
-}
+//     let magic_number = [0x1f, 0x8b];
+//     let first_2 = &header[..2];
+//     if first_2 != magic_number {
+//         error(format!(
+//             "unrecognized gzip magic. \
+//             expected {magic_number:?}, got {first_2:?}"
+//         ))?;
+//     }
 
-fn read_required_headers(mut input: impl BufRead) -> io::Result<Flags> {
-    let mut header = [0; 10];
-    input.read_exact(&mut header)?;
+//     let method = header[2];
+//     if method != 8 {
+//         let reserved = if method < 8 { "reserved value " } else { "" };
+//         error(format!(
+//             "unsupported compression method. \
+//             expected 8, got {reserved}{method}"
+//         ))?;
+//     }
 
-    let magic_number = [0x1f, 0x8b];
-    let first_2 = &header[..2];
-    if first_2 != magic_number {
-        error(format!(
-            "unrecognized gzip magic. \
-            expected {magic_number:?}, got {first_2:?}"
-        ))?;
-    }
+//     let flags = Flags::new(header[3])?;
 
-    let method = header[2];
-    if method != 8 {
-        let reserved = if method < 8 { "reserved value " } else { "" };
-        error(format!(
-            "unsupported compression method. \
-            expected 8, got {reserved}{method}"
-        ))?;
-    }
+//     // These aren't very useful (and in particular, the gzip RFC permits us to ignore them).
+//     let _mtime = &header[4..8]; // The modification time of the original uncompressed file.
+//     let _xflags = header[8]; // May be used to indicate the level of compression performed.
+//     let _os = header[9]; // The operating system / file system on which the compression took place.
 
-    let flags = Flags::new(header[3])?;
+//     Ok(flags)
+// }
 
-    // These aren't very useful (and in particular, the gzip RFC permits us to ignore them).
-    let _mtime = &header[4..8]; // The modification time of the original uncompressed file.
-    let _xflags = header[8]; // May be used to indicate the level of compression performed.
-    let _os = header[9]; // The operating system / file system on which the compression took place.
+// fn discard_optional_headers(mut input: impl BufRead, flags: Flags) -> io::Result<()> {
+//     if flags.contains(Flags::EXTRA) {
+//         let mut buf = vec![0; read_u16_le(&mut input)? as usize];
+//         input.read_exact(&mut buf)?;
+//     }
 
-    Ok(flags)
-}
+//     // For now, we just discard the "original file name" field, if present.
+//     // In the future, we might want to provide an API for the user to get this value.
+//     if flags.contains(Flags::NAME) {
+//         let mut buf = vec![];
+//         input.read_until(0, &mut buf)?;
+//     }
 
-fn discard_optional_headers(mut input: impl BufRead, flags: Flags) -> io::Result<()> {
-    if flags.contains(Flags::EXTRA) {
-        let mut buf = vec![0; read_u16_le(&mut input)? as usize];
-        input.read_exact(&mut buf)?;
-    }
+//     if flags.contains(Flags::COMMENT) {
+//         let mut buf = vec![];
+//         input.read_until(0, &mut buf)?;
+//     }
 
-    // For now, we just discard the "original file name" field, if present.
-    // In the future, we might want to provide an API for the user to get this value.
-    if flags.contains(Flags::NAME) {
-        let mut buf = vec![];
-        input.read_until(0, &mut buf)?;
-    }
+//     if flags.contains(Flags::HCRC) {
+//         // Ignored, as permitted by the RFC.
+//         // It would be nice to implement this. (todo)
+//         let _header_crc = read_u16_le(&mut input)?;
+//     }
 
-    if flags.contains(Flags::COMMENT) {
-        let mut buf = vec![];
-        input.read_until(0, &mut buf)?;
-    }
+//     // We ignore this flag, as permitted by the RFC.
+//     // We're producing a stream of bytes anyways, so it doesn't matter if
+//     // it's hinted that the contents is probably text.
+//     let _is_text = flags.contains(Flags::TEXT);
 
-    if flags.contains(Flags::HCRC) {
-        // Ignored, as permitted by the RFC.
-        // It would be nice to implement this. (todo)
-        let _header_crc = read_u16_le(&mut input)?;
-    }
-
-    // We ignore this flag, as permitted by the RFC.
-    // We're producing a stream of bytes anyways, so it doesn't matter if
-    // it's hinted that the contents is probably text.
-    let _is_text = flags.contains(Flags::TEXT);
-
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// The gzip spec permits ignoring the CRC, but it would be nice to
 /// implement this. (todo)
@@ -140,18 +126,6 @@ fn validate_eof(mut input: impl BufRead) -> io::Result<()> {
     }
 
     Ok(())
-}
-
-fn read_u16_le(mut input: impl BufRead) -> io::Result<u16> {
-    let mut buf = [0; 2];
-    input.read_exact(&mut buf)?;
-    Ok(u16::from_le_bytes(buf))
-}
-
-fn read_u32_le(mut input: impl BufRead) -> io::Result<u32> {
-    let mut buf = [0; 4];
-    input.read_exact(&mut buf)?;
-    Ok(u32::from_le_bytes(buf))
 }
 
 #[cfg(test)]

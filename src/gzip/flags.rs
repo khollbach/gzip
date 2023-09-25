@@ -1,11 +1,14 @@
-use std::io::{self, ErrorKind};
+use std::io;
 
 use bitflags::bitflags;
+
+use crate::error;
 
 bitflags! {
     /// Gzip header flags.
     ///
     /// See RFC 1952 for detailed information about each flag.
+    #[derive(Debug)]
     pub struct Flags: u8 {
         /// An optional indication that the payload is "probably ASCII text".
         const TEXT = 0b_0000_0001;
@@ -29,10 +32,14 @@ bitflags! {
 
 impl Flags {
     /// Return an error if any reserved bit is set.
-    pub fn new(flag_byte: u8) -> io::Result<Self> {
-        Self::from_bits(flag_byte).ok_or_else(|| {
-            let msg = format!("reserved bit set in gzip flag byte: {flag_byte:08b}");
-            io::Error::new(ErrorKind::Other, msg)
-        })
+    pub fn new(flag_byte: u8) -> io::Result<Flags> {
+        // todo: is there a helper method that does this?
+        // > ok_or ??
+        match Flags::from_bits(flag_byte) {
+            Some(flags) => Ok(flags),
+            None => error(format!(
+                "reserved bit set in gzip flag byte: {flag_byte:08b}"
+            )),
+        }
     }
 }
