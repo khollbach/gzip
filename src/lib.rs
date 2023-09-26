@@ -1,47 +1,51 @@
 #![feature(generators, generator_trait, try_trait_v2)]
 
-mod bufread;
-mod gzip;
+mod bufread_adapter;
+mod deflate;
+mod flags;
 
-use std::io::{self, prelude::*, ErrorKind};
+#[allow(dead_code)]
+mod deflate_miniz;
 
-use bufread::BufReadAdapter;
-use gzip::flags::Flags;
+use std::{
+    error::Error as StdError,
+    io::{self, prelude::*, ErrorKind},
+};
+
+use bufread_adapter::BufReadAdapter;
+pub use flags::Flags;
 
 pub fn decode(compressed_input: impl BufRead) -> impl BufRead {
-    // BufReadAdapter::new(gzip::decode(compressed_input))
+    BufReadAdapter::new(decode_all(compressed_input))
+}
 
-    let decoder = start_decoding(compressed_input).unwrap(); // TODO: propagate somehow
-    decoder.decode_body()
+#[propane::generator]
+fn decode_all(input: impl BufRead) -> io::Result<Vec<u8>> {
+    let decoder = start_decoding(input)?;
+    for chunk in decoder.decode_body_iter() {
+        yield Ok(chunk?);
+    }
 }
 
 pub fn start_decoding<R: BufRead>(compressed_input: R) -> io::Result<Decoder<R>> {
     let mut input = compressed_input;
-
     let mut header = read_required_headers(&mut input)?;
     read_optional_headers(&mut input, &mut header)?;
     Ok(Decoder { header, input })
 }
 
-use std::error::Error as StdError;
+#[propane::generator]
+fn decode_body(mut input: impl BufRead) -> io::Result<Vec<u8>> {
+    // (TODO: is this safe?)
+    // This tricks `propane` into thinking we're not holding a reference across
+    // a yield-point... but idk if the code is actually 'correct'.
+    let raw_input: *mut _ = &mut input;
+    for chunk in deflate_miniz::decode(unsafe { raw_input.as_mut().unwrap() }) {
+        yield Ok(chunk?);
+    }
 
-pub(crate) fn error<T, E>(error: E) -> io::Result<T>
-where
-    E: Into<Box<dyn StdError + Send + Sync>>,
-{
-    Err(io::Error::new(ErrorKind::Other, error))
-}
-
-pub(crate) fn read_u16_le(mut input: impl BufRead) -> io::Result<u16> {
-    let mut buf = [0; 2];
-    input.read_exact(&mut buf)?;
-    Ok(u16::from_le_bytes(buf))
-}
-
-pub(crate) fn read_u32_le(mut input: impl BufRead) -> io::Result<u32> {
-    let mut buf = [0; 4];
-    input.read_exact(&mut buf)?;
-    Ok(u32::from_le_bytes(buf))
+    validate_footer(&mut input)?;
+    validate_eof(&mut input)?;
 }
 
 pub struct Decoder<R: BufRead> {
@@ -56,11 +60,15 @@ impl<R: BufRead> Decoder<R> {
     }
 
     pub fn decode_body(self) -> impl BufRead {
-        BufReadAdapter::new(gzip::decode_body(self.input))
+        BufReadAdapter::new(self.decode_body_iter())
+    }
+
+    fn decode_body_iter(self) -> impl Iterator<Item = io::Result<Vec<u8>>> {
+        decode_body(self.input)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Header {
     pub flags: Flags,
     pub mtime: u32,
@@ -74,14 +82,6 @@ pub struct Header {
     // todo: actually validate this somehow (if it exists)
     pub header_crc: Option<u16>,
 }
-
-// fn crc(input) -> u16 {
-//     let mut check = 0;
-//     for byte in input {
-//         check ^= byte;
-//     }
-//     check
-// }
 
 fn read_required_headers(mut input: impl BufRead) -> io::Result<Header> {
     let mut header = [0; 10];
@@ -137,12 +137,18 @@ fn read_optional_headers(mut input: impl BufRead, required_headers: &mut Header)
     if header.flags.contains(Flags::NAME) {
         let mut buf = vec![];
         input.read_until(0, &mut buf)?;
+        if buf.ends_with(&[0]) {
+            buf.pop();
+        }
         header.name = Some(buf);
     }
 
     if header.flags.contains(Flags::COMMENT) {
         let mut buf = vec![];
         input.read_until(0, &mut buf)?;
+        if buf.ends_with(&[0]) {
+            buf.pop();
+        }
         header.comment = Some(buf);
     }
 
@@ -161,7 +167,104 @@ fn read_optional_headers(mut input: impl BufRead, required_headers: &mut Header)
     Ok(())
 }
 
-// -> Decoder
-// Decoder::bufreader() -> BufRead
-// Decoder::headers ... () -> Option<&str>
-// struct Headers { ... }
+/// The gzip spec permits ignoring the CRC, but it would be nice to
+/// implement this. (todo)
+fn validate_footer(mut input: impl BufRead) -> io::Result<()> {
+    let _crc = read_u32_le(&mut input)?;
+    let _uncompressed_size_mod_32 = read_u32_le(&mut input)?;
+    Ok(())
+}
+
+fn validate_eof(mut input: impl BufRead) -> io::Result<()> {
+    if !input.fill_buf()?.is_empty() {
+        // We could add support for gzip multi-streams at some point,
+        // but they're almost never used. People prefer to simply `tar`
+        // and then `gzip` if they're compressing multiple files.
+        error(
+            "expected eof, but got more bytes \
+            (note: multiple gzip members not supported)",
+        )?;
+
+        // todo: does our impl still conform to the spec?
+        // (maybe we should impl multi-streams...)
+    }
+
+    Ok(())
+}
+
+pub(crate) fn error<T, E>(error: E) -> io::Result<T>
+where
+    E: Into<Box<dyn StdError + Send + Sync>>,
+{
+    Err(io::Error::new(ErrorKind::Other, error))
+}
+
+pub(crate) fn read_u16_le(mut input: impl BufRead) -> io::Result<u16> {
+    let mut buf = [0; 2];
+    input.read_exact(&mut buf)?;
+    Ok(u16::from_le_bytes(buf))
+}
+
+pub(crate) fn read_u32_le(mut input: impl BufRead) -> io::Result<u32> {
+    let mut buf = [0; 4];
+    input.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use flate2::{read::GzEncoder, Compression};
+    use test_case::test_case;
+
+    use super::*;
+
+    /// Take as input a pre-gzipped text file of just "hello".
+    ///
+    /// Start decoding it and inspect the headers.
+    ///
+    /// Make sure they look like what we expect.
+    #[test]
+    fn hello_header() -> anyhow::Result<()> {
+        let hello_gzipped: &str =
+            "1f8b0808962a1365000368656c6c6f2e74787400cb48cdc9c9e7020020303a3606000000";
+        let expected_header: Header = Header {
+            flags: Flags::NAME,
+            mtime: 1695754902,
+            xflags: 0,
+            os: 3,
+            extra: None,
+            name: Some(vec![104, 101, 108, 108, 111, 46, 116, 120, 116]),
+            comment: None,
+            header_crc: None,
+        };
+
+        let bytes = hex::decode(hello_gzipped)?;
+        let decoder = start_decoding(bytes.as_slice())?;
+
+        assert_eq!(decoder.header(), &expected_header);
+        Ok(())
+    }
+
+    #[test_case(b"Hello world!")]
+    #[test_case(b"abc")]
+    #[test_case(b"A")]
+    #[test_case(b"")]
+    fn round_trip(input: &[u8]) -> anyhow::Result<()> {
+        let compressed = gzip_compress(input);
+
+        let mut decompressed = decode(compressed.as_slice());
+        let mut bytes = vec![];
+        decompressed.read_to_end(&mut bytes)?;
+
+        assert_eq!(&bytes, input);
+        Ok(())
+    }
+
+    fn gzip_compress(bytes: &[u8]) -> Vec<u8> {
+        let mut out = vec![];
+        GzEncoder::new(bytes, Compression::default())
+            .read_to_end(&mut out)
+            .unwrap();
+        out
+    }
+}

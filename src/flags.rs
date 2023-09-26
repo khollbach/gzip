@@ -8,7 +8,7 @@ bitflags! {
     /// Gzip header flags.
     ///
     /// See RFC 1952 for detailed information about each flag.
-    #[derive(Debug)]
+    #[derive(Debug, PartialEq, Eq)]
     pub struct Flags: u8 {
         /// An optional indication that the payload is "probably ASCII text".
         const TEXT = 0b_0000_0001;
@@ -33,8 +33,6 @@ bitflags! {
 impl Flags {
     /// Return an error if any reserved bit is set.
     pub fn new(flag_byte: u8) -> io::Result<Flags> {
-        // todo: is there a helper method that does this?
-        // > ok_or ??
         match Flags::from_bits(flag_byte) {
             Some(flags) => Ok(flags),
             None => error(format!(
