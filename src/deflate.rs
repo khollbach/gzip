@@ -3,10 +3,11 @@ use std::{
     io::{self, BufRead},
 };
 
-use crate::gzip::{error, read_u16_le};
+use crate::{error, read_u16_le};
 
 /// Size of decompressed chunks (except possibly the last chunk, which may be
 /// smaller).
+#[allow(dead_code)] // todo
 const OUT_CHUNK_SIZE: usize = 32 * 1024;
 
 #[propane::generator]
