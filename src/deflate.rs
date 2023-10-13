@@ -1,3 +1,5 @@
+mod symbol_table;
+
 use std::{
     cmp::min,
     io::{self, BufRead},
@@ -10,6 +12,12 @@ use crate::{error, read_u16_le};
 #[allow(dead_code)] // todo
 const OUT_CHUNK_SIZE: usize = 32 * 1024;
 
+// block types:
+const NON_COMPRESSED: u8 = 0b_0000_0000;
+const COMPRESSED_FIXED: u8 = 0b_0010_0000;
+const COMPRESSED: u8 = 0b_0100_0000;
+const RESERVED: u8 = 0b_0110_0000;
+
 #[propane::generator]
 pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     // One iteration per block.
@@ -19,13 +27,13 @@ pub fn decode(mut input: impl BufRead) -> io::Result<Vec<u8>> {
         let mut buf = [0u8; 1];
         input.read_exact(&mut buf)?;
         let header_bits = buf[0];
-        let last_block = header_bits & 1 << 7 != 0;
-        let btype = header_bits >> 5 & 0b_11;
+        let last_block = (header_bits & 0b_1000_0000) != 0;
+        let btype = header_bits & 0b_0110_0000;
         match btype {
-            0b_00 => (),
-            0b_01 => todo!(),
-            0b_10 => todo!(),
-            0b_11 => error("reserved block header bit pattern: 11")?,
+            NON_COMPRESSED => (),
+            COMPRESSED_FIXED => todo!(),
+            COMPRESSED => todo!(),
+            RESERVED => error("reserved block header bit pattern: 11")?,
             _ => unreachable!(),
         }
 

@@ -4,8 +4,8 @@ mod bufread_adapter;
 mod deflate;
 mod flags;
 
-#[allow(dead_code)]
-mod deflate_miniz;
+// // #[allow(dead_code)]
+// mod deflate_miniz;
 
 use std::{
     error::Error as StdError,
@@ -40,7 +40,7 @@ fn decode_body(mut input: impl BufRead) -> io::Result<Vec<u8>> {
     // This tricks `propane` into thinking we're not holding a reference across
     // a yield-point... but idk if the code is actually 'correct'.
     let raw_input: *mut _ = &mut input;
-    for chunk in deflate_miniz::decode(unsafe { raw_input.as_mut().unwrap() }) {
+    for chunk in deflate::decode(unsafe { raw_input.as_mut().unwrap() }) {
         yield Ok(chunk?);
     }
 
